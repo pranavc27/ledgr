@@ -1,4 +1,4 @@
-# Ledger — UPI-aware Statement Summarizer
+# Ledgr — UPI-aware Statement Summarizer
 
 Upload **one** HDFC savings-account statement (PDF / CSV / XLS / XLSX) and get a
 clean monthly spend dashboard. The point of difference: Indian UPI narrations
