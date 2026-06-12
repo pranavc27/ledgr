@@ -1,58 +1,120 @@
-# Ledgr — UPI-aware Statement Summarizer
+# Ledgr — see where your money actually went
 
-Upload **one** HDFC savings-account statement (PDF / CSV / XLS / XLSX) and get a
-clean monthly spend dashboard. The point of difference: Indian UPI narrations
-are messy (`UPI-RAMVEER DHAKAD-Q226732165@YBL-...`), and most trackers dump
-person-to-person transfers into "Misc". This one pulls them out and shows a net
-ledger per person.
+**An AI-powered expense summarizer built for the mess of Indian UPI bank statements.**
+Upload one HDFC statement (PDF / CSV / XLS) and get a clean monthly dashboard — with
+the person-to-person UPI transfers that most trackers bury in "Misc" pulled out and
+named.
 
-> **Stateless by design.** The statement is parsed in memory and discarded.
-> There is no database, no login, and nothing about your transactions is
-> persisted. The only data that ever leaves the server is cleaned narration
-> text sent to the categorization model — never account numbers or balances.
+### 🔗 [**Live demo → ledgr-expense-tracker.vercel.app**](https://ledgr-expense-tracker.vercel.app)
+
+<!-- To add a hero image: take a screenshot of the live dashboard, save it as
+     docs/dashboard.png, then uncomment the line below.
+![Ledgr dashboard](docs/dashboard.png)
+-->
+
+> **Stateless by design.** The statement is parsed in memory and discarded — no
+> database, no login, nothing about your transactions is persisted. The only data
+> that leaves the server is cleaned narration text sent to the categorization model;
+> never account numbers or balances.
+
+---
+
+## The problem
+
+Indian bank statements are dominated by UPI, and UPI narrations are noise:
+
+```
+UPI-ARUN ANTONY-PKT-9746251006@OKBIZAXIS-UTIB0000553-123808823039-UPI
+UPI-RAMVEER DHAKAD-Q226732165@YBL-YESB0YBLUPI-123817972571-UPI
+```
+
+Generic expense trackers can't make sense of this, so a huge share of real
+spending — money sent to friends, family, landlords, local vendors — gets dumped
+into a useless "Misc" bucket. **The most interesting part of your spending becomes
+invisible.** Ledgr's whole reason for existing is to handle that long tail well.
+
+## What it does
+
+- **One upload → a full month.** Drop an HDFC statement (PDF, CSV, or XLS). Get
+  totals, a category breakdown (donut + bars), top merchants, and every transaction.
+- **People, not "Misc".** Person-to-person UPI transfers are detected and shown by
+  name, with **net sent/received per counterparty** — the headline feature.
+- **Hybrid categorization.** Instant deterministic matching for the fat head,
+  Gemini for the messy long tail. Every row is editable and recomputes the summary
+  live.
+- **Confidence + review queue.** Low-confidence rows surface in a "Review these"
+  section up top; confirm or correct them in one tap.
+- **PDF report export.** Download a clean one-page summary report (generated
+  client-side).
+- **Secure by design.** No account, no database, parsed in memory and discarded.
+- Animated landing page, fully responsive (mobile-friendly), dark minimal UI.
 
 ---
 
 ## How it works — the hybrid pipeline
 
-Categorization runs in three stages so the LLM only ever sees the long tail:
+Categorization runs in three stages so the LLM only ever sees what it needs to,
+keeping it cheap and fast:
 
 1. **Pass 1 — deterministic (no network).** The narration is normalized
-   (lowercased, UPI refs / IFSC / phone numbers stripped) and matched against a
-   built-in merchant table (Swiggy, Zomato, Blinkit, IRCTC, Amazon, Uber, …)
-   plus a few unambiguous specials (ATM withdrawals, interest/salary credits).
+   (lowercased; UPI refs / IFSC codes / phone numbers stripped) and matched against
+   a built-in merchant table (Swiggy, Zomato, Blinkit, IRCTC, Amazon, Uber, …) plus
+   a few unambiguous specials (ATM withdrawals, interest / salary credits).
 2. **P2P detection (no network).** HDFC's UPI grammar
-   (`UPI-<NAME>-<VPA>@<HANDLE>-…`) is parsed. A confident person — a multi-word
-   human name, or a phone-number VPA — is bucketed as **People** with the
-   counterparty surfaced. Ambiguous single names are deferred to the LLM.
-3. **Pass 2 — LLM (Gemini 2.0 Flash).** Everything still unmatched is batched
-   (~30 rows/call) and sent to Gemini, which returns strict JSON
-   (`{index, category, cleaned_merchant, is_person}`). Output is parsed
-   defensively (markdown fences stripped, categories validated). Repeated
-   narrations are de-duplicated per request so each distinct merchant/person is
-   only sent once.
+   (`UPI-<NAME>-<VPA>@<HANDLE>-…`) is parsed. Only an unambiguous signal — a
+   **phone-number UPI handle** — is bucketed as **People** deterministically. Named
+   or random handles (which a person *and* a business can share) are deferred to the
+   LLM, so companies like "Google India Digital" don't pollute the People bucket.
+3. **Pass 2 — LLM (Gemini, `gemini-2.5-flash-lite`).** Everything still unmatched
+   is batched (~30 rows/call) and sent to Gemini, which returns strict JSON
+   (`{index, category, cleaned_merchant, is_person, confidence}`). Output is parsed
+   defensively (markdown fences stripped, categories validated). Repeated narrations
+   are de-duplicated per request so each distinct merchant/person is sent only once.
 
-After parsing, the app reports **what % of transactions Pass 1/P2P caught vs
-what went to the LLM** — shown in the dashboard header and logged server-side.
+The dashboard header reports **what % of transactions the deterministic passes
+caught vs. what went to the LLM**.
 
 ### Confidence + review queue
 
-Every transaction carries a `high | low` confidence flag. Exact merchant
-matches and deterministic specials are `high`; the LLM returns its own
-confidence per row. On top of that, a **large one-off transfer** (> ₹2,000) to a
-personal/unknown UPI handle that appears only once in the statement is forced to
-`low` — these are often COD paid to a delivery rider's personal UPI or a
-marketplace settlement and can't be reliably attributed from the statement
-alone. Recurring transfers to the same counterparty stay `high`.
+Every transaction carries a `high | low` confidence flag. Exact matches and
+deterministic specials are `high`; the LLM returns its own confidence. On top of
+that, a **large one-off transfer** (> ₹2,000) to a personal/unknown UPI handle seen
+only once in the statement is forced to `low` — these are often a COD payment to a
+delivery rider's personal UPI or a marketplace settlement, and can't be reliably
+attributed. Recurring transfers to the same counterparty stay `high`. Low-confidence
+rows surface in the **"Review these"** section; correcting a counterparty propagates
+the choice to every transaction with the same counterparty for the session.
 
-Low-confidence rows surface in a **"Review these"** section at the top of the
-dashboard, each with an inline category dropdown. Correcting one recomputes the
-summary live (client-side only). Correcting a **counterparty** propagates the
-choice to every transaction with the same normalized counterparty for the rest
-of the session.
+---
 
-Each bank format is isolated in one module (`lib/parsers/hdfc.ts`) so other
-banks can be added later without touching the rest of the app.
+## Tech stack
+
+- **Frontend:** React + Vite + TypeScript + Tailwind. Recharts for the donut.
+  Single dashboard page; PDF export via jsPDF (lazy-loaded).
+- **Backend:** Vercel serverless function (`api/parse.ts`), Node. PDF decryption +
+  positional text extraction via `pdfjs-dist`; spreadsheets via SheetJS.
+- **AI:** Google Gemini (`gemini-2.5-flash-lite`), key read from `GEMINI_API_KEY`.
+- **Deploy:** Vercel.
+
+## Project layout
+
+```
+api/parse.ts              POST endpoint: parse → categorize → JSON (stateless)
+lib/
+  processStatement.ts     Shared core used by the API and the local dev server
+  parsers/
+    pdfText.ts            pdfjs: decrypt + positional (x/y) text extraction
+    hdfc.ts               HDFC PDF + CSV/XLS parser (the only bank-specific code)
+  categorize/
+    merchantTable.ts      Pass 1 deterministic merchant matching
+    p2pDetector.ts        Confident person-to-person detection
+    llm.ts                Gemini batching + defensive JSON parsing
+  pipeline.ts             Orchestrates Pass 1 → P2P → LLM, dedup cache, stats
+client/                   React + Vite + Tailwind dashboard
+```
+
+Each bank format is isolated in one module (`lib/parsers/hdfc.ts`) so other banks
+can be added without touching the rest of the app.
 
 ---
 
@@ -61,96 +123,68 @@ banks can be added later without touching the rest of the app.
 Prerequisites: Node 18+.
 
 ```bash
-# 1. Install root (API) + client deps
-npm run install:all
+npm run install:all                 # install root (API) + client deps
+cp .env.example .env                # then set GEMINI_API_KEY (optional)
 
-# 2. (optional) Set your Gemini key for the LLM pass
-cp .env.example .env
-#   then edit .env and set GEMINI_API_KEY
+npm run build                       # build the client once
+npm run dev:local                   # serve client + API → http://localhost:3000
 ```
 
-### Easiest: local server, no Vercel account needed
+`dev:local` runs the **exact same pipeline as production** without needing the Vercel
+CLI. Open the URL, upload a statement, enter the PDF password if prompted. Without a
+Gemini key the deterministic passes still run and the long tail is left as "Other".
 
-```bash
-npm run build        # build the client once → client/dist
-npm run dev:local    # serve client + /api/parse → http://localhost:3000
-```
-
-Open http://localhost:3000, upload an HDFC statement, enter the PDF password if
-prompted, and you'll see the dashboard. This runs the **exact same pipeline** as
-production (`lib/processStatement.ts`), just without the Vercel runtime — ideal
-for a quick local test. It reads `GEMINI_API_KEY` from `.env`; without it, the
-deterministic passes still run and the long tail is left as "Other".
-
-You can also test the API directly:
+You can also hit the API directly:
 
 ```bash
 curl -X POST http://localhost:3000/api/parse \
   -F "file=@/path/to/statement.pdf" -F "password=YOUR_PDF_PASSWORD"
 ```
 
-### Alternative: run through the Vercel CLI
+| Env var          | Required | Purpose                                                    |
+| ---------------- | -------- | ---------------------------------------------------------- |
+| `GEMINI_API_KEY` | No\*     | Gemini key for the LLM pass.                               |
+| `GEMINI_MODEL`   | No       | Override the model (default `gemini-2.5-flash-lite`).      |
 
-```bash
-npm i -g vercel
-npm run dev            # API + client, single command → http://localhost:3000
-# …or the Vite dev server with HMR (terminal 2): cd client && npm run dev
-```
+\* Without it, deterministic passes work and the long tail stays "Other".
 
-PDFs are usually password-protected — the app prompts for the password and
-passes it straight to the parser (it is never stored).
+## Deploy (Vercel)
 
-### Required environment variables
-
-| Variable         | Required | Purpose                                              |
-| ---------------- | -------- | ---------------------------------------------------- |
-| `GEMINI_API_KEY` | No\*     | Gemini 2.0 Flash key for Pass 2 categorization.      |
-
-\* The app runs without it — deterministic passes still work and the long tail
-is left as "Other" with a visible notice.
+`vercel --prod` (the included `vercel.json` builds the client to `client/dist` and
+deploys `api/parse.ts` as a serverless function). Add `GEMINI_API_KEY` as a project
+environment variable.
 
 ---
 
-## Deploy to Vercel
+## Engineering notes — things I hit and how I solved them
 
-1. Push this folder to a Git repo and **Import Project** in Vercel.
-2. Vercel auto-detects the config in `vercel.json`:
-   - Build command: `npm run build` (builds the Vite client to `client/dist`)
-   - Output directory: `client/dist`
-   - `api/*.ts` is deployed as serverless functions automatically.
-3. In **Project → Settings → Environment Variables**, add `GEMINI_API_KEY`.
-4. Deploy. The dashboard is served from the root; the parser runs at
-   `POST /api/parse`.
+A few problems that made this more than a CRUD app:
 
-The `api/parse.ts` function is given a 60s max duration (see `vercel.json`) to
-allow for larger statements + batched LLM calls.
+- **The PDF table doesn't line up with its headers.** In the real HDFC PDF, narration
+  text sits well *left* of the "Narration" column header, and the money columns are
+  *right-aligned*. A naïve "assign each word to the nearest header" approach put
+  narration into the Date column and misread deposits as withdrawals. The parser
+  instead detects the leftmost date token per row and classifies amounts by their
+  **right edge** (rightmost = closing balance; the rest split on the Deposit column
+  boundary). See `lib/parsers/hdfc.ts`.
 
----
+- **`ERR_REQUIRE_ESM` on Vercel — worked locally, crashed in production.** `pdfjs`
+  v4 is ESM-only, but Vercel compiles the function to CommonJS and TypeScript
+  silently downlevels `await import()` into `require()` — which can't load an ES
+  module. It passed every local test because `tsx` runs ESM natively. Fix: force a
+  genuine runtime `import()` via `new Function('s','return import(s)')` (so the
+  compiler can't rewrite it) and force-bundle pdfjs with `includeFiles` in
+  `vercel.json`. Diagnosed by reading the live function logs.
 
-## Project layout
-
-```
-api/parse.ts              POST endpoint: parse → categorize → JSON (stateless)
-lib/
-  parsers/
-    types.ts              NormalizedTransaction + BankParser contract
-    pdfText.ts            pdfjs: decrypt + positional text extraction
-    hdfc.ts               HDFC PDF + CSV/XLS parser (the only bank-specific code)
-  categorize/
-    types.ts              Category buckets + pipeline stats
-    merchantTable.ts      Pass 1 deterministic merchant matching
-    p2pDetector.ts        Confident person-to-person detection
-    llm.ts                Gemini 2.0 Flash batching + defensive JSON parsing
-  pipeline.ts             Orchestrates Pass 1 → P2P → LLM, dedup cache, stats
-client/                   React + Vite + Tailwind dashboard (one page)
-```
-
-## Supported buckets
-
-Food & Dining · Groceries · Travel & Transport · Shopping · Bills & Utilities ·
-Entertainment · Health · People (P2P) · Income · Investments · Cash/ATM · Other
+- **Keeping businesses out of "People".** A name-based heuristic flagged
+  "Google India Digital" as a person. The fix was to trust *only* phone-number UPI
+  handles deterministically and let the LLM judge the semantically ambiguous cases.
 
 ## Scope
 
-Implemented for HDFC only (structured so other banks slot in). No accounts,
-auth, budgets, alerts, or persistent storage — by design.
+Implemented for **HDFC** (structured so other banks slot in). No accounts, auth,
+budgets, alerts, or persistent storage — by design. Stateless and privacy-first.
+
+---
+
+Built by [Pranav Chandak](https://www.linkedin.com/in/pranav-chandak-26a413230/).
