@@ -1,0 +1,25 @@
+{
+  "name": "upi-expense-summarizer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "vercel dev",
+    "dev:local": "tsx dev-server.ts",
+    "build": "cd client && npm install && npm run build",
+    "install:all": "npm install && cd client && npm install",
+    "typecheck": "tsc --noEmit && cd client && tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.24.1",
+    "formidable": "^3.5.1",
+    "pdfjs-dist": "^4.7.76",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/formidable": "^3.4.5",
+    "@types/node": "^20.11.0",
+    "@vercel/node": "^3.2.7",
+    "tsx": "^4.19.2",
+    "typescript": "^5.3.3"
+  }
+}
