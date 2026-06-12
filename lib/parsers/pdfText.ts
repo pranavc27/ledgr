@@ -20,12 +20,23 @@ export interface TextItem {
  * into columns. Password failures are mapped to typed ParseErrors so the API
  * can prompt the user instead of 500ing.
  */
+// pdfjs v4 is ESM-only. We must load it with a *real* runtime dynamic import().
+// A plain `await import(...)` gets downleveled by tsc to require() when the
+// function is compiled to CommonJS (as Vercel does), which crashes with
+// ERR_REQUIRE_ESM. Wrapping it in `new Function` hides it from tsc so it stays
+// a genuine import() — and pdfjs is force-bundled via vercel.json includeFiles
+// (since this also hides it from the dependency tracer).
+const importESM: (s: string) => Promise<any> = new Function(
+  's',
+  'return import(s)',
+) as never;
+
 export async function extractPdfText(
   buffer: Buffer,
   password?: string,
 ): Promise<TextItem[]> {
   // Legacy build runs in Node without a real worker thread.
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const pdfjs = await importESM('pdfjs-dist/legacy/build/pdf.mjs');
 
   let doc;
   try {
